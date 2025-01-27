@@ -25,25 +25,31 @@ local function in_dir(dir)
 	end
 end
 
+---@param source_dir string
+---@return boolean
+local function warn_if_not_in_source_dir(source_dir)
+	if not in_dir(source_dir) then
+		vim.api.nvim_echo({
+			{
+				"Warning: The current working directory is not within the directory to be synced. Aborting.",
+				"WarningMsg",
+			},
+		}, true, {})
+		return false
+	end
+
+	return true
+end
+
 function M.setup(opts)
 	config = vim.tbl_extend("force", config, opts or {})
 end
 
 function M.push()
-  --TODO: only push if cwd == source?
+	--TODO: only push if cwd == source?
 	local config1 = config[1]
 
-	if not in_dir(config1.source) then
-		vim.api.nvim_echo(
-			{
-				{
-					"Warning: The current working directory is not within the directory to be synced. Aborting.",
-					"WarningMsg",
-				},
-			},
-			true,
-			{}
-		)
+	if not warn_if_not_in_source_dir(config1.source) then
 		return
 	end
 
@@ -64,6 +70,30 @@ function M.push()
 	end
 end
 
+function M.pull()
+	local config1 = config[1]
+
+	if not warn_if_not_in_source_dir(config1.source) then
+		return
+	end
+
+	local output = vim.fn.system({
+		"rsync",
+		"-avz",
+		"--exclude-from",
+		config1.exclude,
+		config1.dest,
+		config1.source,
+	})
+
+	if vim.v.shell_error ~= 0 then
+		vim.api.nvim_err_writeln("rsync failed: " .. output)
+	else
+		print(output)
+	end
+end
+
 vim.api.nvim_create_user_command("SinkPush", M.push, {})
+vim.api.nvim_create_user_command("SinkPull", M.pull, {})
 
 return M
