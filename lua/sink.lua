@@ -49,6 +49,27 @@ local function handle_exit(code, signal)
 	end
 end
 
+local function stream_stdout(stdout, stdout_chunks)
+	vim.uv.read_start(stdout, function(err, data)
+		assert(not err, err)
+		if data then
+			table.insert(stdout_chunks, data)
+		end
+	end)
+end
+
+local function handle_rsync_exit(code, signal, stdout_chunks)
+	vim.schedule(function()
+		if code ~= 0 then
+			vim.api.nvim_err_writeln("rsync failed with code: " .. code)
+		else
+			vim.api.nvim_echo({
+				{ "rsync completed successfully:\n" .. table.concat(stdout_chunks, ""), "Normal" },
+			}, true, {})
+		end
+	end)
+end
+
 function M.setup(opts)
 	config = vim.tbl_extend("force", config, opts or {})
 end
@@ -62,8 +83,10 @@ function M.push()
 	end
 
 	local handle, pid
-	local stdout = vim.uv.new_pipe(false)
-	local output = {}
+	local stdin = vim.uv.new_pipe()
+	local stdout = vim.uv.new_pipe()
+	local stderr = vim.uv.new_pipe()
+	local stdout_chunks = {}
 
 	-- run rsync to push to the remote
 	handle, pid = vim.uv.spawn("rsync", {
@@ -75,11 +98,12 @@ function M.push()
 			config1.source,
 			config1.dest,
 		},
-		stdio = { nil, stdout, nil },
+		stdio = { stdin, stdout, stderr },
 	}, function(code, signal)
-		print("exit code", code)
-		print("exit signal", signal)
+		handle_rsync_exit(code, signal, stdout_chunks)
 	end)
+
+	stream_stdout(stdout, stdout_chunks)
 
 	if not handle then
 		vim.api.nvim_err_writeln("Failed to start rsync process")
@@ -94,6 +118,11 @@ function M.pull()
 	end
 
 	local handle, pid
+	local stdin = vim.uv.new_pipe()
+	local stdout = vim.uv.new_pipe()
+	local stderr = vim.uv.new_pipe()
+	local stdout_chunks = {}
+
 	handle, pid = vim.uv.spawn("rsync", {
 		args = {
 			"-avz",
@@ -102,11 +131,12 @@ function M.pull()
 			config1.dest,
 			config1.source,
 		},
-		stdio = { nil, nil, nil },
+		stdio = { stdin, stdout, stderr },
 	}, function(code, signal)
-		print("exit code", code)
-		print("exit signal", signal)
+		handle_rsync_exit(code, signal, stdout_chunks)
 	end)
+
+	stream_stdout(stdout, stdout_chunks)
 
 	if not handle then
 		vim.api.nvim_err_writeln("Failed to start rsync process")
