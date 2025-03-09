@@ -1,15 +1,28 @@
 local M = {}
 
 --- @class RsyncArgs
---- @field args string[] array of arguments for rsync
+--- @field args string[] # array of arguments for rsync
 
 --- @class ConfigEntry
---- @field directory string the directory path
---- @field push RsyncArgs configuration for push operation
---- @field pull RsyncArgs configuration for pull operation
+--- @field push RsyncArgs
+--- @field pull RsyncArgs
 
---- @type ConfigEntry[]
+--- @class SinkConfig
+--- @field paths table<string, ConfigEntry>
+
+--- @type SinkConfig
 local config = {}
+
+--- @param t table
+--- @return number
+local function table_len(t)
+  local count = 0
+  for _ in pairs(t) do
+    count = count + 1
+  end
+
+  return count
+end
 
 --- Checks if the `cwd` is in `dir`.
 ---@param dir string
@@ -39,7 +52,7 @@ local function warn_if_not_in_source_dir(source_dir)
   if not in_dir(source_dir) then
     vim.api.nvim_echo({
       {
-        "Warning: The current working directory is not within the directory to be synced. Aborting.",
+        "Warning: Foobar.",
         "WarningMsg",
       },
     }, true, {})
@@ -49,12 +62,9 @@ local function warn_if_not_in_source_dir(source_dir)
   return true
 end
 
-local function handle_exit(code, signal)
-  if code ~= 0 then
-    vim.api.nvim_err_writeln("rsync failed with code: " .. code)
-  else
-    print("rsync completed successfully")
-  end
+---@param warning string
+local function echo_warning(warning)
+  vim.api.nvim_echo({ { warning, "WarningMsg" } }, true, {})
 end
 
 local function stream_stdout(stdout, stdout_chunks)
@@ -82,11 +92,26 @@ function M.setup(opts)
   config = vim.tbl_extend("force", config, opts or {})
 end
 
-function M.push()
-  --TODO: only push if cwd == source?
-  local config1 = config[1]
+--- @return boolean, string
+local function health()
+  -- No paths configured for rsync
+  if config.paths == nil or table_len(config.paths) == 0 then
+    return false, "Warning: No paths are configured for sink.nvim."
+  end
 
-  if not warn_if_not_in_source_dir(config1.directory) then
+  -- No paths configured for cwd
+  local cwd = vim.loop.cwd()
+  if config.paths[cwd] == nil then
+    return false, "Warning: No paths configured for " .. cwd
+  end
+
+  return true, ""
+end
+
+function M.push()
+  local health_status, health_msg = health()
+  if not health_status then
+    echo_warning(health_msg)
     return
   end
 
@@ -95,10 +120,13 @@ function M.push()
   local stdout = vim.uv.new_pipe()
   local stderr = vim.uv.new_pipe()
   local stdout_chunks = {}
+  
+  local cwd = vim.loop.cwd()
+  local args = config.paths[cwd].push.args
 
   -- run rsync to push to the remote
   handle, pid = vim.uv.spawn("rsync", {
-    args = config1.push.args,
+    args = args,
     stdio = { stdin, stdout, stderr },
   }, function(code, signal)
     handle_rsync_exit(code, signal, stdout_chunks)
@@ -112,9 +140,9 @@ function M.push()
 end
 
 function M.pull()
-  local config1 = config[1]
-
-  if not warn_if_not_in_source_dir(config1.directory) then
+  local health_status, health_msg = health()
+  if not health_status then
+    echo_warning(health_msg)
     return
   end
 
@@ -124,8 +152,11 @@ function M.pull()
   local stderr = vim.uv.new_pipe()
   local stdout_chunks = {}
 
+  local cwd = vim.loop.cwd()
+  local args = config.paths[cwd].push.args
+
   handle, pid = vim.uv.spawn("rsync", {
-    args = config1.pull.args,
+    args = args,
     stdio = { stdin, stdout, stderr },
   }, function(code, signal)
     handle_rsync_exit(code, signal, stdout_chunks)
