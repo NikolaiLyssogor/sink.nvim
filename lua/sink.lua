@@ -24,44 +24,6 @@ local function table_len(t)
   return count
 end
 
---- Checks if the `cwd` is in `dir`.
----@param dir string
----@return boolean
-local function in_dir(dir)
-  local cwd = vim.loop.cwd()
-
-  -- Ensure both paths end without a trailing slash for accurate comparison
-  if dir:sub(-1) == "/" then
-    dir = dir:sub(1, -2)
-  end
-  if cwd:sub(-1) == "/" then
-    cwd = cwd:sub(1, -2)
-  end
-
-  -- Check if the cwd starts with the specified directory path
-  if cwd:sub(1, #dir) ~= dir then
-    return false
-  else
-    return true
-  end
-end
-
----@param source_dir string
----@return boolean
-local function warn_if_not_in_source_dir(source_dir)
-  if not in_dir(source_dir) then
-    vim.api.nvim_echo({
-      {
-        "Warning: Foobar.",
-        "WarningMsg",
-      },
-    }, true, {})
-    return false
-  end
-
-  return true
-end
-
 ---@param warning string
 local function echo_warning(warning)
   vim.api.nvim_echo({ { warning, "WarningMsg" } }, true, {})
@@ -92,24 +54,30 @@ function M.setup(opts)
   config = vim.tbl_extend("force", config, opts or {})
 end
 
+--- @param op "push" | "pull" The operation to perform
 --- @return boolean, string
-local function health()
+local function health(op)
   -- No paths configured for rsync
   if config.paths == nil or table_len(config.paths) == 0 then
-    return false, "Warning: No paths are configured for sink.nvim."
+    return false, "No paths are configured for sink.nvim."
   end
 
   -- No paths configured for cwd
   local cwd = vim.loop.cwd()
   if config.paths[cwd] == nil then
-    return false, "Warning: No paths configured for " .. cwd
+    return false, "sink.nvim: No paths configured for " .. cwd
+  end
+
+  -- Make sure specified op is configured for this directory
+  if config.paths[cwd][op] == nil then
+    return false, "sink.nvim: Command '" .. op .. "' not configured for " .. cwd
   end
 
   return true, ""
 end
 
 function M.push()
-  local health_status, health_msg = health()
+  local health_status, health_msg = health("push")
   if not health_status then
     echo_warning(health_msg)
     return
@@ -120,7 +88,7 @@ function M.push()
   local stdout = vim.uv.new_pipe()
   local stderr = vim.uv.new_pipe()
   local stdout_chunks = {}
-  
+
   local cwd = vim.loop.cwd()
   local args = config.paths[cwd].push.args
 
@@ -140,7 +108,7 @@ function M.push()
 end
 
 function M.pull()
-  local health_status, health_msg = health()
+  local health_status, health_msg = health("pull")
   if not health_status then
     echo_warning(health_msg)
     return
