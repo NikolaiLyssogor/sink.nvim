@@ -76,8 +76,9 @@ local function health(op)
   return true, ""
 end
 
-function M.push()
-  local health_status, health_msg = health("push")
+--- @param op "push" | "pull" The operation to be performed
+function M.rsync(op)
+  local health_status, health_msg = health(op)
   if not health_status then
     echo_warning(health_msg)
     return
@@ -90,38 +91,7 @@ function M.push()
   local stdout_chunks = {}
 
   local cwd = vim.loop.cwd()
-  local args = config.paths[cwd].push.args
-
-  -- run rsync to push to the remote
-  handle, pid = vim.uv.spawn("rsync", {
-    args = args,
-    stdio = { stdin, stdout, stderr },
-  }, function(code, signal)
-    handle_rsync_exit(code, signal, stdout_chunks)
-  end)
-
-  stream_stdout(stdout, stdout_chunks)
-
-  if not handle then
-    vim.api.nvim_err_writeln("Failed to start rsync process")
-  end
-end
-
-function M.pull()
-  local health_status, health_msg = health("pull")
-  if not health_status then
-    echo_warning(health_msg)
-    return
-  end
-
-  local handle, pid
-  local stdin = vim.uv.new_pipe()
-  local stdout = vim.uv.new_pipe()
-  local stderr = vim.uv.new_pipe()
-  local stdout_chunks = {}
-
-  local cwd = vim.loop.cwd()
-  local args = config.paths[cwd].push.args
+  local args = config.paths[cwd][op].args
 
   handle, pid = vim.uv.spawn("rsync", {
     args = args,
@@ -137,7 +107,11 @@ function M.pull()
   end
 end
 
-vim.api.nvim_create_user_command("SinkPush", M.push, {})
-vim.api.nvim_create_user_command("SinkPull", M.pull, {})
+vim.api.nvim_create_user_command("SinkPush", function(_)
+  M.rsync("push")
+end, {})
+vim.api.nvim_create_user_command("SinkPull", function(_)
+  M.rsync("pull")
+end, {})
 
 return M
