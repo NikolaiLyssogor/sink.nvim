@@ -11,7 +11,7 @@ local function read_config()
 
   local f = io.open(config_filepath, "rb")
   if f == nil then
-    echo_error("No .sink.toml file found in cwd: " .. cwd)
+    echo_error("No .sink.json file found in cwd: " .. cwd)
     return nil
   end
 
@@ -20,36 +20,42 @@ local function read_config()
   return raw_config
 end
 
----@param config table
----@param op "push" | "pull"
+---@param command_config table
+---@param index number
 ---@return boolean
-local function validate_sink_json(config, op)
-  if op == "push" and not config.push then
-    echo_error("sink.nvim: To run SinkPush, you must have 'push' configured in .sink.json.")
-    return false
-  end
-  if op == "pull" and not config.pull then
-    echo_error("sink.nvim: To run SinkPull, you must have 'pull' configured in .sink.json.")
+local function validate_command(command_config, index)
+  -- Check for description
+  if not command_config.description or type(command_config.description) ~= "string" then
+    echo_error("sink.nvim: Command #" .. index .. " must have a 'description' field (string).")
     return false
   end
 
-  -- Make sure `push` and `pull` entries are a flat list of strings
-  local args = config[op]
+  -- Check for command
+  if not command_config.command then
+    echo_error("sink.nvim: Command #" .. index .. " must have a 'command' field.")
+    return false
+  end
 
+  local args = command_config.command
   if type(args) ~= "table" then
-    echo_error("sink.nvim: '" .. op .. "' key in .sink.json is not an array.")
+    echo_error("sink.nvim: 'command' in command #" .. index .. " must be an array.")
     return false
   end
 
   local n_args = #args
+  if n_args == 0 then
+    echo_error("sink.nvim: 'command' in command #" .. index .. " cannot be empty.")
+    return false
+  end
+
   for k, v in pairs(args) do
     if type(k) ~= "number" or k % 1 ~= 0 or k < 1 or k > n_args then
-      echo_error("sink.nvim: rsync arguments must all be strings.")
+      echo_error("sink.nvim: Command arguments must all be strings in command #" .. index .. ".")
       return false
     end
 
     if type(v) ~= "string" then
-      echo_error("sink.nvim: rsync arguments must all be strings.")
+      echo_error("sink.nvim: Command arguments must all be strings in command #" .. index .. ".")
       return false
     end
   end
@@ -57,16 +63,66 @@ local function validate_sink_json(config, op)
   -- 'rsync' should not be the first element in the table
   if args[1] == "rsync" then
     echo_error(
-    "sink.nvim: 'rsync' should not be one of the arguments in .sink.json. Provide only the arguments to rsync.")
+      "sink.nvim: 'rsync' should not be one of the arguments in command #" .. index .. ". Provide only the arguments to rsync."
+    )
     return false
   end
 
   return true
 end
 
----@param op "push" | "pull"
----@return table<string, string[]>|nil
-function M.load_local_config(op)
+---@param config table
+---@param require_default boolean
+---@return boolean
+local function validate_sink_json(config, require_default)
+  if not config.commands then
+    echo_error("sink.nvim: .sink.json must have a 'commands' array.")
+    return false
+  end
+
+  if type(config.commands) ~= "table" then
+    echo_error("sink.nvim: 'commands' must be an array.")
+    return false
+  end
+
+  if #config.commands == 0 then
+    echo_error("sink.nvim: At least one command must be specified in 'commands'.")
+    return false
+  end
+
+  -- Validate each command
+  for i, cmd in ipairs(config.commands) do
+    if not validate_command(cmd, i) then
+      return false
+    end
+  end
+
+  -- If require_default is true, check for exactly one default
+  if require_default then
+    local default_count = 0
+    for _, cmd in ipairs(config.commands) do
+      if cmd.default == true then
+        default_count = default_count + 1
+      end
+    end
+
+    if default_count == 0 then
+      echo_error("sink.nvim: No default command found. One command must have 'default: true'.")
+      return false
+    end
+
+    if default_count > 1 then
+      echo_error("sink.nvim: Multiple default commands found. Only one command can have 'default: true'.")
+      return false
+    end
+  end
+
+  return true
+end
+
+---@param require_default boolean
+---@return table|nil
+function M.load_local_config(require_default)
   local raw_config = read_config()
   if raw_config == nil then
     return nil
@@ -78,7 +134,7 @@ function M.load_local_config(op)
     return nil
   end
 
-  if not validate_sink_json(config, op) then
+  if not validate_sink_json(config, require_default) then
     return nil
   end
 
