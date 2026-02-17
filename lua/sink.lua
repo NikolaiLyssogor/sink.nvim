@@ -1,33 +1,8 @@
+local validation = require("validation")
+
 local M = {}
 
---- @class RsyncArgs
---- @field args string[] # array of arguments for rsync
-
---- @class ConfigEntry
---- @field push RsyncArgs
---- @field pull RsyncArgs
-
---- @class SinkConfig
---- @field paths table<string, ConfigEntry>
-
---- @type SinkConfig
 local config = {}
-
---- @param t table
---- @return number
-local function table_len(t)
-  local count = 0
-  for _ in pairs(t) do
-    count = count + 1
-  end
-
-  return count
-end
-
----@param warning string
-local function echo_warning(warning)
-  vim.api.nvim_echo({ { warning, "WarningMsg" } }, true, {})
-end
 
 local function stream_stdout(stdout, stdout_chunks)
   vim.uv.read_start(stdout, function(err, data)
@@ -54,47 +29,21 @@ function M.setup(opts)
   config = vim.tbl_extend("force", config, opts or {})
 end
 
---- @param op "push" | "pull" The operation to perform
---- @return boolean, string
-local function health(op)
-  -- No paths configured for rsync
-  if config.paths == nil or table_len(config.paths) == 0 then
-    return false, "No paths are configured for sink.nvim."
-  end
-
-  -- No paths configured for cwd
-  local cwd = vim.loop.cwd()
-  if config.paths[cwd] == nil then
-    return false, "sink.nvim: No paths configured for " .. cwd
-  end
-
-  -- Make sure specified op is configured for this directory
-  if config.paths[cwd][op] == nil then
-    return false, "sink.nvim: Command '" .. op .. "' not configured for " .. cwd
-  end
-
-  return true, ""
-end
-
 --- @param op "push" | "pull" The operation to be performed
 function M.rsync(op)
-  local health_status, health_msg = health(op)
-  if not health_status then
-    echo_warning(health_msg)
+  local local_config = validation.load_local_config(op)
+  if local_config == nil then
     return
   end
 
-  local handle, pid
+  local handle
   local stdin = vim.uv.new_pipe()
   local stdout = vim.uv.new_pipe()
   local stderr = vim.uv.new_pipe()
   local stdout_chunks = {}
 
-  local cwd = vim.loop.cwd()
-  local args = config.paths[cwd][op].args
-
-  handle, pid = vim.uv.spawn("rsync", {
-    args = args,
+  handle, _ = vim.uv.spawn("rsync", {
+    args = local_config[op],
     stdio = { stdin, stdout, stderr },
   }, function(code, signal)
     handle_rsync_exit(code, signal, stdout_chunks)
