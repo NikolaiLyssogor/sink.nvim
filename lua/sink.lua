@@ -13,7 +13,7 @@ local function stream_stdout(stdout, stdout_chunks)
   end)
 end
 
-local function handle_rsync_exit(code, signal, stdout_chunks)
+local function handle_rsync_exit(code, _, stdout_chunks)
   vim.schedule(function()
     if code ~= 0 then
       vim.api.nvim_err_writeln("rsync failed with code: " .. code)
@@ -82,22 +82,5 @@ function M.sink(use_default)
     end)
   end
 end
-
-vim.api.nvim_create_user_command("Sink", function(opts)
-  local arg = opts.args
-
-  -- Parse "default=true" or "default=false"
-  local use_default
-  if arg == "default=true" then
-    use_default = true
-  elseif arg == "default=false" then
-    use_default = false
-  else
-    vim.api.nvim_err_writeln("Sink command requires 'default=true' or 'default=false' as argument")
-    return
-  end
-
-  M.sink(use_default)
-end, { nargs = 1 })
 
 return M
