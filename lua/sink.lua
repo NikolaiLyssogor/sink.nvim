@@ -4,49 +4,52 @@ local M = {}
 
 local config = {}
 
-local function stream_stdout(stdout, stdout_chunks)
-  vim.uv.read_start(stdout, function(err, data)
-    assert(not err, err)
-    if data then
-      table.insert(stdout_chunks, data)
-    end
-  end)
-end
-
-local function handle_rsync_exit(code, _, stdout_chunks)
-  vim.schedule(function()
-    if code ~= 0 then
-      vim.api.nvim_err_writeln("rsync failed with code: " .. code)
-    else
-      vim.api.nvim_echo({
-        { "rsync completed successfully:\n" .. table.concat(stdout_chunks, ""), "Normal" },
-      }, true, {})
-    end
-  end)
-end
-
 function M.setup(opts)
   config = vim.tbl_extend("force", config, opts or {})
 end
 
 --- @param command_args string[] The rsync arguments to run
 local function run_rsync(command_args)
-  local handle
-  local stdin = vim.uv.new_pipe()
-  local stdout = vim.uv.new_pipe()
-  local stderr = vim.uv.new_pipe()
-  local stdout_chunks = {}
+  local job_id
+  local output_chunks = {}
+  local password_sent = false
 
-  handle, _ = vim.uv.spawn("rsync", {
-    args = command_args,
-    stdio = { stdin, stdout, stderr },
-  }, function(code, signal)
-    handle_rsync_exit(code, signal, stdout_chunks)
-  end)
+  local function on_stdout(_, data, _)
+    for _, line in ipairs(data) do
+      local clean = line:gsub("\r", "")
+      if not password_sent and clean:lower():find("password:") then
+        password_sent = true
+        vim.schedule(function()
+          local password = vim.fn.inputsecret("SSH password: ")
+          vim.fn.chansend(job_id, password .. "\n")
+          password_sent = false
+        end)
+      elseif clean ~= "" then
+        table.insert(output_chunks, clean)
+      end
+    end
+  end
 
-  stream_stdout(stdout, stdout_chunks)
+  local function on_exit(_, code, _)
+    vim.schedule(function()
+      if code ~= 0 then
+        vim.api.nvim_err_writeln("rsync failed with code: " .. code)
+      else
+        vim.api.nvim_echo({
+          { "rsync completed successfully:\n" .. table.concat(output_chunks, "\n"), "Normal" },
+        }, true, {})
+      end
+    end)
+  end
 
-  if not handle then
+  local cmd = vim.list_extend({ "rsync" }, command_args)
+  job_id = vim.fn.jobstart(cmd, {
+    pty = true,
+    on_stdout = on_stdout,
+    on_exit = on_exit,
+  })
+
+  if job_id <= 0 then
     vim.api.nvim_err_writeln("Failed to start rsync process")
   end
 end
