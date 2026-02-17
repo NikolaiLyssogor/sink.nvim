@@ -2,6 +2,12 @@
 
 A Neovim plugin that wraps `rsync` to sync files between your local machine and a remote server. `sink.nvim` is especially useful for developing on remote servers. Rather than installing Neovim on the remote, edit your files locally using your dialed-in Neovim config and then quickly push files up to the server when you are ready to run them. 
 
+## Features
+
+- Run a default rsync command instantly with a single keymap
+- Interactively pick from multiple configured sync targets via `vim.ui.select`
+- SSH password support
+
 ## Requirements
 
 - Neovim 0.10+
